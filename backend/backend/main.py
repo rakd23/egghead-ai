@@ -106,7 +106,3 @@ async def chat(req: ChatRequest):
         "references": [{"title": r["title"], "type": "ucd_resource", "id": r["id"]} for r in refs] if req.preferences.show_references else [],
         "safety": {"category": "none"},
     }
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
