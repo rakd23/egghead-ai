@@ -1,36 +1,127 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Egghead.AI Setup Instructions
 
-## Getting Started
+## 📁 File Structure
 
-First, run the development server:
+```
+your-project/
+├── app/
+│   ├── page.tsx              ← Replace with the new page.tsx
+│   ├── layout.tsx            ← Keep your existing one
+│   ├── globals.css           ← Keep your existing one
+│   └── api/
+│       └── chat/
+│           └── route.ts      ← Create this file
+├── main.py                   ← Create this file
+├── package.json              ← Keep your existing one
+└── README.md                 ← This file
+```
+
+## 🚀 Step-by-Step Setup
+
+### 1. Install Frontend Dependencies (if not already)
+
+```bash
+npm install
+# or
+yarn install
+```
+
+### 2. Install Backend Dependencies
+
+```bash
+pip install fastapi uvicorn pydantic
+```
+
+### 3. Copy the Files
+
+1. **Replace** `app/page.tsx` with the new `page.tsx` file
+2. **Create** `app/api/chat/route.ts` with the `route.ts` file
+3. **Create** `main.py` in your project root with the `main.py` file
+
+### 4. Run the Backend (Terminal 1)
+
+```bash
+python main.py
+```
+
+You should see:
+```
+INFO:     Uvicorn running on http://0.0.0.0:8000
+INFO:     Application startup complete.
+```
+
+### 5. Run the Frontend (Terminal 2)
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+You should see:
+```
+▲ Next.js 14.x.x
+- Local:        http://localhost:3000
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 6. Open Your Browser
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Go to: http://localhost:3000
 
-## Learn More
+## ✨ Features
 
-To learn more about Next.js, take a look at the following resources:
+- **Sidebar with conversation history** grouped by date (Today, Yesterday, Last 7 Days, Older)
+- **Dynamic layout** - centered title that moves to top-left after first message
+- **New Chat button** - start fresh conversations
+- **Delete conversations** - hover over any conversation to see the × button
+- **localStorage** - all conversations are saved automatically
+- **Connected to FastAPI backend** - messages go through your Python backend
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🧪 Testing
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Try these messages:
+- "Hello!" → Should get "I'm still learning, but I got your message!"
+- "Tell me about UC Davis" → Should get "UC Davis is a great campus 🌳"
 
-## Deploy on Vercel
+## 🔧 Troubleshooting
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Frontend shows "Error: could not reach backend"
+- Make sure `python main.py` is running in a separate terminal
+- Check that port 8000 is not being used by another process
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Port 3000 already in use
+```bash
+# Kill the process on port 3000
+lsof -ti:3000 | xargs kill -9
+# Or run on a different port
+npm run dev -- -p 3001
+```
+
+### Port 8000 already in use
+```bash
+# Kill the process on port 8000
+lsof -ti:8000 | xargs kill -9
+# Or change the port in main.py
+uvicorn.run(app, host="0.0.0.0", port=8001)
+# And update route.ts to match
+```
+
+### Conversations not saving
+- Check browser console for localStorage errors
+- Try clearing localStorage: Open DevTools > Application > Local Storage > Delete
+
+## 📝 Next Steps
+
+Now that it's working, you can enhance the backend in `main.py`:
+- Add the UC Davis resources from your game plan
+- Integrate with Hugging Face models
+- Add more sophisticated routing logic
+- Connect to a database instead of localStorage
+
+## 🎨 Keeping Your Colors
+
+The new UI uses your exact colors:
+- `#200E57` → `#3B1FA6` gradient background
+- `#2A176B` for message bubbles and input
+- Yellow (`#FFD700`) for branding
+- White borders and text
+
+All your original styling is preserved!
