@@ -20,7 +20,7 @@ import googlemaps  # NEW: Google Maps import
 
 app = FastAPI()
 
-# Allow your Next.js dev server to call this backend from the browser
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -32,7 +32,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Optional: nice sanity check so "/" doesn't return {"detail":"Not Found"}
 @app.get("/")
 def root():
     return {"ok": True, "routes": ["/docs", "/redoc", "/chat"]}
@@ -47,15 +46,15 @@ load_dotenv()
 # Make sure OPENAI_API_KEY is set in your environment or in a .env file
 # e.g. backend/.env with OPENAI_API_KEY=...
 if not os.getenv("OPENAI_API_KEY"):
-    # Don't hard-fail here; just print a useful message.
+    
     print("WARNING: OPENAI_API_KEY is not set. /chat will fail until it's set.")
 
 llm = ChatOpenAI(
-    model="gpt-3.5-turbo",
+    model="gpt-4o-mini",
     temperature=0.7,
 )
 
-# NEW: Initialize Google Maps client
+# Initialize Google Maps client
 gmaps = None
 if os.getenv("GOOGLE_MAPS_API_KEY"):
     gmaps = googlemaps.Client(key=os.getenv("GOOGLE_MAPS_API_KEY"))
@@ -105,7 +104,7 @@ async def search_reddit(query: str) -> str:
         return ""
 
 
-# NEW: Google Maps search helper
+#  Google Maps search helper
 # ------------------------------------------------------------------------------
 
 async def search_campus_location(query: str) -> str:
@@ -165,7 +164,7 @@ async def search_campus_location(query: str) -> str:
 # Prompt + Schemas
 # ------------------------------------------------------------------------------
 
-# UPDATED: System prompt to mention location capabilities
+
 SYSTEM_PROMPT = """You are a helpful and friendly UC Davis campus assistant.
 
 You have extensive knowledge about:
