@@ -9,9 +9,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
 from pydantic import BaseModel, Field
-import googlemaps  # NEW: Google Maps import
+import googlemaps
 
 
 # ------------------------------------------------------------------------------
@@ -19,7 +20,6 @@ import googlemaps  # NEW: Google Maps import
 # ------------------------------------------------------------------------------
 
 app = FastAPI()
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,21 +38,33 @@ def root():
 
 
 # ------------------------------------------------------------------------------
-# Env + LLM
+# Env + LLM + Vector Store
 # ------------------------------------------------------------------------------
 
 load_dotenv()
 
-# Make sure OPENAI_API_KEY is set in your environment or in a .env file
-# e.g. backend/.env with OPENAI_API_KEY=...
 if not os.getenv("OPENAI_API_KEY"):
-    
     print("WARNING: OPENAI_API_KEY is not set. /chat will fail until it's set.")
 
 llm = ChatOpenAI(
     model="gpt-4o-mini",
     temperature=0.7,
 )
+
+# Load the UC Davis knowledge base vector store
+print("Loading UC Davis knowledge base...")
+embeddings = OpenAIEmbeddings()
+vectorstore = None
+try:
+    vectorstore = FAISS.load_local(
+    "faiss_db",
+    embeddings,
+    allow_dangerous_deserialization=True
+)
+    print("✓ UC Davis knowledge base loaded!")
+except Exception as e:
+    print(f"WARNING: Could not load vector store: {e}")
+    print("Make sure you've run build_vectorstore.py first!")
 
 # Initialize Google Maps client
 gmaps = None
@@ -86,15 +98,10 @@ async def search_reddit(query: str) -> str:
         formatted = []
         for i, r in enumerate(results, 1):
             formatted.append(
-                "Result {i}:\n"
-                "Title: {title}\n"
-                "Content: {body}\n"
-                "URL: {href}\n".format(
-                    i=i,
-                    title=r.get("title", "N/A"),
-                    body=r.get("body", "N/A"),
-                    href=r.get("href", "N/A"),
-                )
+                f"Result {i}:\n"
+                f"Title: {r.get('title', 'N/A')}\n"
+                f"Content: {r.get('body', 'N/A')}\n"
+                f"URL: {r.get('href', 'N/A')}\n"
             )
 
         return "\n---\n".join(formatted)
@@ -104,7 +111,8 @@ async def search_reddit(query: str) -> str:
         return ""
 
 
-#  Google Maps search helper
+# ------------------------------------------------------------------------------
+# Google Maps search helper
 # ------------------------------------------------------------------------------
 
 async def search_campus_location(query: str) -> str:
@@ -114,7 +122,6 @@ async def search_campus_location(query: str) -> str:
     
     try:
         def do_maps_search():
-            # Search for places near UC Davis
             places_result = gmaps.places(
                 query=f"{query} UC Davis",
                 location=(38.5382, -121.7617),  # UC Davis coordinates
@@ -133,24 +140,16 @@ async def search_campus_location(query: str) -> str:
             address = place.get('formatted_address', 'N/A')
             rating = place.get('rating', 'N/A')
             
-            # Get coordinates if available
             location = place.get('geometry', {}).get('location', {})
             lat = location.get('lat', 'N/A')
             lng = location.get('lng', 'N/A')
             
             formatted.append(
-                "Location {i}:\n"
-                "Name: {name}\n"
-                "Address: {address}\n"
-                "Rating: {rating}\n"
-                "Coordinates: {lat}, {lng}\n".format(
-                    i=i,
-                    name=name,
-                    address=address,
-                    rating=rating,
-                    lat=lat,
-                    lng=lng,
-                )
+                f"Location {i}:\n"
+                f"Name: {name}\n"
+                f"Address: {address}\n"
+                f"Rating: {rating}\n"
+                f"Coordinates: {lat}, {lng}\n"
             )
         
         return "\n---\n".join(formatted)
@@ -164,8 +163,9 @@ async def search_campus_location(query: str) -> str:
 # Prompt + Schemas
 # ------------------------------------------------------------------------------
 
-
 SYSTEM_PROMPT = """You are a helpful and friendly UC Davis campus assistant.
+
+IMPORTANT: When information is provided to you from the UC Davis knowledge base, Reddit, or Google Maps, you MUST use it to answer questions. This information is REAL and CURRENT.
 
 You have extensive knowledge about:
 - UC Davis campus locations, buildings, and facilities
@@ -176,15 +176,15 @@ You have extensive knowledge about:
 - The local Davis area
 
 You have access to:
-1. Web search to find current information from the UC Davis Reddit community (r/UCDavis)
-2. Google Maps API to find campus locations, buildings, and nearby places
+1. UC Davis knowledge base (campus info, dining, housing, buildings, etc.)
+2. Reddit search for current student opinions and experiences
+3. Google Maps for precise location and address information
 
-When search results are provided:
-- Use the actual content from Reddit posts to answer questions
-- Cite specific opinions or information from the posts
-- Mention that the information comes from UC Davis Reddit or Google Maps
-- Summarize multiple perspectives if available
-- For locations, provide specific addresses and directions when available
+When information is provided:
+- Use the UC Davis knowledge base as your primary source
+- Reference Reddit posts when discussing student opinions: "According to recent Reddit posts..."
+- Cite Google Maps data for locations and addresses
+- Be specific and detailed using the provided information
 
 Always be enthusiastic about UC Davis and provide accurate, helpful information.
 """
@@ -205,23 +205,37 @@ class ChatRequest(BaseModel):
 @app.post("/chat")
 async def chat(req: ChatRequest):
     try:
-        # Decide if we should do a reddit search
+        # STEP 1: Search UC Davis knowledge base
+        uc_davis_context = ""
+        if vectorstore:
+            print("Searching UC Davis knowledge base...")
+            relevant_docs = await asyncio.to_thread(
+                vectorstore.similarity_search,
+                req.message,
+                k=3  # Get top 3 most relevant chunks
+            )
+            
+            if relevant_docs:
+                uc_davis_context = "\n\n".join([doc.page_content for doc in relevant_docs])
+                print(f"Found {len(relevant_docs)} relevant documents from knowledge base")
+        
+        # STEP 2: Check if we should search Reddit
         search_keywords = [
             "reddit", "recent", "latest", "current", "today",
             "this year", "right now", "people say", "students think",
             "opinions", "reviews", "experiences", "what's it like",
-            "best", "worst", "recommend", "class",
+            "best", "worst", "recommend"
         ]
         needs_web_search = any(k in req.message.lower() for k in search_keywords)
 
-        # NEW: Check for location-related queries
+        # STEP 3: Check for location-related queries
         location_keywords = [
             "where", "location", "address", "directions", "find",
             "building", "place", "near", "close", "map", "how to get"
         ]
         needs_maps = any(k in req.message.lower() for k in location_keywords)
 
-        # NEW: Collect results from multiple sources
+        # STEP 4: Collect results from multiple sources
         web_results = ""
         
         # Search Reddit if needed
@@ -232,7 +246,7 @@ async def chat(req: ChatRequest):
                 web_results += f"\n=== Reddit Posts ===\n{reddit_data}\n"
                 print("Found Reddit results")
 
-        # NEW: Search Google Maps if needed
+        # Search Google Maps if needed
         if needs_maps:
             print(f"Searching Google Maps for: {req.message}")
             maps_data = await search_campus_location(req.message)
@@ -240,17 +254,21 @@ async def chat(req: ChatRequest):
                 web_results += f"\n=== Campus Locations (Google Maps) ===\n{maps_data}\n"
                 print("Found Google Maps results")
 
-        # Build the final user prompt
+        # STEP 5: Build the final user prompt with all context
+        context_parts = []
+        
+        if uc_davis_context:
+            context_parts.append(f"=== UC Davis Knowledge Base ===\n{uc_davis_context}")
+        
         if web_results:
-            current_message = (
-                f"{web_results}\n\n"
-                f"User question: {req.message}\n\n"
-                "Please use the above information to provide an informed answer."
-            )
+            context_parts.append(web_results.strip())
+        
+        if context_parts:
+            current_message = "\n\n".join(context_parts) + f"\n\n---\n\nUser question: {req.message}"
         else:
             current_message = req.message
 
-        # Build LangChain message list
+        # STEP 6: Build LangChain message list
         messages = [SystemMessage(content=SYSTEM_PROMPT)]
 
         for m in req.conversation_history:
@@ -261,8 +279,11 @@ async def chat(req: ChatRequest):
 
         messages.append(HumanMessage(content=current_message))
 
-        # Invoke LLM (in a thread so we don't block event loop)
+        print(f"Sending {len(messages)} messages to LLM")
+
+        # Invoke LLM
         response = await asyncio.to_thread(llm.invoke, messages)
+        print("Response generated")
 
         return {"response": response.content}
 
