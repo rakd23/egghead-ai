@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from supabase import create_client, Client
+
 import asyncio
 import os
 from typing import List
@@ -10,7 +12,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
 from pydantic import BaseModel, Field
 import googlemaps
 
@@ -38,7 +39,7 @@ def root():
 
 
 # ------------------------------------------------------------------------------
-# Env + LLM + Vector Store
+# Env + LLM + Supabase
 # ------------------------------------------------------------------------------
 
 load_dotenv()
@@ -51,20 +52,22 @@ llm = ChatOpenAI(
     temperature=0.7,
 )
 
-# Load the UC Davis knowledge base vector store
-print("Loading UC Davis knowledge base...")
+# Connect to Supabase
+print("Connecting to Supabase...")
 embeddings = OpenAIEmbeddings()
-vectorstore = None
+supabase_client = None
+
 try:
-    vectorstore = FAISS.load_local(
-    "faiss_db",
-    embeddings,
-    allow_dangerous_deserialization=True
-)
-    print("✓ UC Davis knowledge base loaded!")
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+    
+    if supabase_url and supabase_key:
+        supabase_client: Client = create_client(supabase_url, supabase_key)
+        print("✓ Connected to Supabase!")
+    else:
+        print("WARNING: SUPABASE_URL or SUPABASE_SERVICE_KEY not set")
 except Exception as e:
-    print(f"WARNING: Could not load vector store: {e}")
-    print("Make sure you've run build_vectorstore.py first!")
+    print(f"WARNING: Could not connect to Supabase: {e}")
 
 # Initialize Google Maps client
 gmaps = None
@@ -205,19 +208,74 @@ class ChatRequest(BaseModel):
 @app.post("/chat")
 async def chat(req: ChatRequest):
     try:
-        # STEP 1: Search UC Davis knowledge base
+        # STEP 1: Search UC Davis knowledge base in Supabase (hybrid search)
         uc_davis_context = ""
-        if vectorstore:
+        if supabase_client:
             print("Searching UC Davis knowledge base...")
-            relevant_docs = await asyncio.to_thread(
-                vectorstore.similarity_search,
-                req.message,
-                k=3  # Get top 3 most relevant chunks
-            )
-            
-            if relevant_docs:
-                uc_davis_context = "\n\n".join([doc.page_content for doc in relevant_docs])
-                print(f"Found {len(relevant_docs)} relevant documents from knowledge base")
+            try:
+                # First try vector search
+                query_embedding = await asyncio.to_thread(embeddings.embed_query, req.message)
+                
+                def do_vector_search():
+                    return supabase_client.rpc(
+                        'match_documents',
+                        {'query_embedding': query_embedding, 'match_count': 5}
+                    ).execute()
+                
+                response = await asyncio.to_thread(do_vector_search)
+                
+                # Check if we got good results (similarity > 0.75)
+                good_results = []
+                if response.data:
+                    good_results = [doc for doc in response.data if doc.get('similarity', 0) > 0.75]
+                    print(f"Vector search: {len(response.data)} docs, {len(good_results)} with >0.75 similarity")
+                
+                # If vector search didn't find good matches, try keyword search
+                if len(good_results) < 2:
+                    print("Vector search weak, trying keyword search...")
+                    # Extract keywords from the query
+                    keywords = [word for word in req.message.lower().split() 
+                               if len(word) > 3 and word not in ['what', 'where', 'when', 'which', 'are', 'the', 'all']]
+                    
+                    if keywords:
+                        def do_keyword_search():
+                            # Try each keyword separately and combine results
+                            all_docs = []
+                            for kw in keywords[:3]:
+                                result = supabase_client.table('documents').select('content').ilike('content', f'%{kw}%').limit(3).execute()
+                                if result.data:
+                                    all_docs.extend(result.data)
+                            # Remove duplicates
+                            seen = set()
+                            unique_docs = []
+                            for doc in all_docs:
+                                doc_str = doc['content']
+                                if doc_str not in seen:
+                                    seen.add(doc_str)
+                                    unique_docs.append(doc)
+                            return unique_docs[:5]  # Return max 5
+                        
+                        keyword_results = await asyncio.to_thread(do_keyword_search)
+                        if keyword_results:
+                            print(f"Keyword search found {len(keyword_results)} documents")
+                            # DEBUG: Print preview of what we found
+                            for i, doc in enumerate(keyword_results[:2]):
+                              print(f"  Doc {i+1}: {doc['content'][:150]}...")
+                            uc_davis_context = "\n\n".join([doc['content'] for doc in keyword_results])
+                        else:
+                            # Fall back to vector results even if weak
+                            if response.data:
+                                uc_davis_context = "\n\n".join([doc['content'] for doc in response.data])
+                    else:
+                        # No good keywords, use vector results
+                        if response.data:
+                            uc_davis_context = "\n\n".join([doc['content'] for doc in response.data])
+                else:
+                    # Vector search found good results
+                    uc_davis_context = "\n\n".join([doc['content'] for doc in good_results])
+                    
+            except Exception as e:
+                print(f"Error searching knowledge base: {e}")
         
         # STEP 2: Check if we should search Reddit
         search_keywords = [
