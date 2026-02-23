@@ -29,7 +29,70 @@ def scrape_page(url):
 
 # List of NEW pages to scrape (only add new ones here)
 urls_to_scrape = [
-    "https://admissions.ucdavis.edu/", 
+     "https://admissions.ucdavis.edu/",
+    "https://admissions.ucdavis.edu/first-year",
+    "https://admissions.ucdavis.edu/transfer",
+    
+    # Academics
+    "https://catalog.ucdavis.edu/",
+    "https://ucdavis.edu/academics",
+    "https://registrar.ucdavis.edu/",
+    
+    # Housing
+    "https://housing.ucdavis.edu/",
+    "https://housing.ucdavis.edu/undergraduate",
+    "https://housing.ucdavis.edu/applying",
+    
+    # Health & Wellness
+    "https://shcs.ucdavis.edu/",
+    "https://shcs.ucdavis.edu/services/counseling-services",
+    "https://shcs.ucdavis.edu/services/medical",
+    
+    # Student Life
+    "https://campusrecreation.ucdavis.edu/",
+    "https://campusrecreation.ucdavis.edu/facilities/activities-recreation-center",
+    "https://studentaffairs.ucdavis.edu/",
+    
+    # Financial Aid
+    "https://financialaid.ucdavis.edu/",
+    "https://financialaid.ucdavis.edu/undergraduate",
+    "https://financialaid.ucdavis.edu/cost",
+    
+    # Campus Resources
+    "https://success.ucdavis.edu/",
+    "https://icc.ucdavis.edu/",
+    "https://sdc.ucdavis.edu/",
+    "https://cee.ucdavis.edu/",
+    
+    # Libraries
+    "https://library.ucdavis.edu/",
+    "https://library.ucdavis.edu/service/shields-library/",
+    
+    # Career
+    "https://icc.ucdavis.edu/",
+    "https://icc.ucdavis.edu/find/jobs-internships",
+    
+    # Dining
+    "https://dining.ucdavis.edu/",
+    "https://dining.ucdavis.edu/dining-commons",
+    
+    # Transportation
+    "https://transportation.ucdavis.edu/",
+    "https://unitrans.ucdavis.edu/",
+    
+    # Safety
+    "https://police.ucdavis.edu/",
+    "https://safetyservices.ucdavis.edu/",
+    
+    # Departments (add specific ones you want)
+    "https://cs.ucdavis.edu/",
+    "https://biology.ucdavis.edu/",
+    "https://economics.ucdavis.edu/",
+    "https://psychology.ucdavis.edu/",
+    
+    # Events & Traditions
+    "https://picnicday.ucdavis.edu/",
+    "https://ucdavis.edu/about/values-culture", 
       # Add your new URL here
 ]
 
