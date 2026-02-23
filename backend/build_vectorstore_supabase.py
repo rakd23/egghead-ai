@@ -23,6 +23,15 @@ if not supabase_url or not supabase_key:
 supabase: Client = create_client(supabase_url, supabase_key)
 print("✓ Connected to Supabase", flush=True)
 
+# CLEAR OLD DATA TO PREVENT DUPLICATES
+print("Step 1.5: Clearing old data from Supabase...", flush=True)
+try:
+    # Delete all existing documents
+    supabase.table("documents").delete().neq("id", 0).execute()
+    print("✓ Old data cleared", flush=True)
+except Exception as e:
+    print(f"Warning: Could not clear old data: {e}", flush=True)
+
 print("Step 2: Loading documents from uc_davis_data/...", flush=True)
 loader = DirectoryLoader('uc_davis_data/', glob="**/*.txt", loader_cls=TextLoader)
 documents = loader.load()
