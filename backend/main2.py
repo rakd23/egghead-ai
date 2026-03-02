@@ -4,16 +4,22 @@ from supabase import create_client, Client
 
 import asyncio
 import os
-from typing import List
+from typing import List, Optional
+import re
+import base64
+from io import BytesIO
 
 from ddgs import DDGS
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, Field
 import googlemaps
+import requests
+from bs4 import BeautifulSoup
+from PIL import Image
 
 
 # ------------------------------------------------------------------------------
@@ -35,7 +41,7 @@ app.add_middleware(
 
 @app.get("/")
 def root():
-    return {"ok": True, "routes": ["/docs", "/redoc", "/chat"]}
+    return {"ok": True, "routes": ["/docs", "/redoc", "/chat", "/upload-image"]}
 
 
 # ------------------------------------------------------------------------------
@@ -49,6 +55,12 @@ if not os.getenv("OPENAI_API_KEY"):
 
 llm = ChatOpenAI(
     model="gpt-4o-mini",
+    temperature=0.7,
+)
+
+# Vision model for image parsing
+vision_llm = ChatOpenAI(
+    model="gpt-4o-mini",  # gpt-4o-mini supports vision
     temperature=0.7,
 )
 
@@ -78,20 +90,159 @@ else:
 
 
 # ------------------------------------------------------------------------------
-# Reddit search helper
+# Image Upload & Parsing Endpoint
 # ------------------------------------------------------------------------------
 
-async def search_reddit(query: str) -> str:
-    """Search UC Davis subreddit using DuckDuckGo results constrained to r/UCDavis."""
+@app.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Parse text/content from uploaded images using GPT-4 Vision"""
+    try:
+        # Read image
+        content = await file.read()
+        
+        # Validate it's an image
+        if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+            raise HTTPException(status_code=400, detail="File must be an image (png, jpg, jpeg, gif, webp)")
+        
+        # Convert to base64
+        base64_image = base64.b64encode(content).decode('utf-8')
+        
+        print(f"Processing image: {file.filename}")
+        
+        # Use GPT-4 Vision to extract text/understand image
+        def parse_image():
+            from langchain_core.messages import HumanMessage
+            
+            message = HumanMessage(
+                content=[
+                    {
+                        "type": "text",
+                        "text": "Extract all text from this image. If it's a document, transcribe it exactly. If it's a photo/diagram, describe what you see in detail. Be thorough and accurate."
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
+                        }
+                    }
+                ]
+            )
+            
+            response = vision_llm.invoke([message])
+            return response.content
+        
+        extracted_text = await asyncio.to_thread(parse_image)
+        
+        print(f"Extracted {len(extracted_text)} characters from image")
+        
+        return {
+            "text": extracted_text,
+            "filename": file.filename,
+            "length": len(extracted_text)
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
+
+
+# ------------------------------------------------------------------------------
+# RateMyProfessor scraper
+# ------------------------------------------------------------------------------
+
+async def search_rate_my_professor(professor_name: str) -> str:
+    """Scrape RateMyProfessor for UC Davis professors"""
+    try:
+        def do_scrape():
+            search_url = f"https://www.ratemyprofessors.com/search/professors/1082?q={professor_name.replace(' ', '%20')}"
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(search_url, headers=headers, timeout=10)
+            
+            if response.status_code != 200:
+                return None
+            
+            page_content = response.text
+            soup = BeautifulSoup(page_content, 'html.parser')
+            
+            scripts = soup.find_all('script')
+            for script in scripts:
+                if script.string and 'window.__RELAY_STORE__' in script.string:
+                    script_content = script.string
+                    
+                    rating_match = re.search(r'"avgRating":([\d.]+)', script_content)
+                    difficulty_match = re.search(r'"avgDifficulty":([\d.]+)', script_content)
+                    num_ratings_match = re.search(r'"numRatings":(\d+)', script_content)
+                    would_take_again_match = re.search(r'"wouldTakeAgainPercent":([\d.]+)', script_content)
+                    
+                    if rating_match:
+                        return {
+                            'rating': rating_match.group(1),
+                            'difficulty': difficulty_match.group(1) if difficulty_match else 'N/A',
+                            'num_ratings': num_ratings_match.group(1) if num_ratings_match else 'N/A',
+                            'would_take_again': would_take_again_match.group(1) if would_take_again_match else 'N/A'
+                        }
+            
+            return None
+        
+        result = await asyncio.to_thread(do_scrape)
+        
+        if not result:
+            return ""
+        
+        return f"""RateMyProfessor Results for {professor_name}:
+Overall Rating: {result['rating']}/5.0
+Difficulty: {result['difficulty']}/5.0
+Number of Ratings: {result['num_ratings']}
+Would Take Again: {result['would_take_again']}%"""
+    
+    except Exception as e:
+        print(f"RateMyProfessor scrape error: {e}")
+        return ""
+
+
+# ------------------------------------------------------------------------------
+# Web search helpers
+# ------------------------------------------------------------------------------
+
+async def search_web_general(query: str) -> str:
+    """Search the entire web using DuckDuckGo"""
     try:
         def do_search():
             with DDGS() as ddgs:
-                return list(
-                    ddgs.text(
-                        f"{query} site:reddit.com/r/ucdavis",
-                        max_results=5,
-                    )
-                )
+                return list(ddgs.text(query, max_results=5))
+        
+        results = await asyncio.to_thread(do_search)
+        
+        if not results:
+            return ""
+        
+        formatted = []
+        for i, r in enumerate(results, 1):
+            formatted.append(
+                f"Result {i}:\n"
+                f"Title: {r.get('title', 'N/A')}\n"
+                f"Content: {r.get('body', 'N/A')}\n"
+                f"URL: {r.get('href', 'N/A')}\n"
+            )
+        
+        return "\n---\n".join(formatted)
+    
+    except Exception as e:
+        print(f"Web search error: {e}")
+        return ""
+
+async def search_reddit(query: str) -> str:
+    """Search UC Davis subreddit"""
+    try:
+        def do_search():
+            with DDGS() as ddgs:
+                return list(ddgs.text(f"{query} site:reddit.com/r/ucdavis", max_results=5))
 
         results = await asyncio.to_thread(do_search)
 
@@ -119,7 +270,7 @@ async def search_reddit(query: str) -> str:
 # ------------------------------------------------------------------------------
 
 async def search_campus_location(query: str) -> str:
-    """Search for UC Davis campus locations using Google Maps API."""
+    """Search for UC Davis campus locations"""
     if not gmaps:
         return ""
     
@@ -127,8 +278,8 @@ async def search_campus_location(query: str) -> str:
         def do_maps_search():
             places_result = gmaps.places(
                 query=f"{query} UC Davis",
-                location=(38.5382, -121.7617),  # UC Davis coordinates
-                radius=3000  # 3km radius
+                location=(38.5382, -121.7617),
+                radius=3000
             )
             return places_result
         
@@ -168,7 +319,7 @@ async def search_campus_location(query: str) -> str:
 
 SYSTEM_PROMPT = """You are a helpful and friendly UC Davis campus assistant.
 
-IMPORTANT: When information is provided to you from the UC Davis knowledge base, Reddit, or Google Maps, you MUST use it to answer questions. This information is REAL and CURRENT.
+IMPORTANT: When information is provided to you from the UC Davis knowledge base, web search, Reddit, RateMyProfessor, Google Maps, or uploaded images, you MUST use it to answer questions. This information is REAL and CURRENT.
 
 You have extensive knowledge about:
 - UC Davis campus locations, buildings, and facilities
@@ -177,16 +328,23 @@ You have extensive knowledge about:
 - Admissions and enrollment information
 - Campus events and UC Davis traditions (like Picnic Day!)
 - The local Davis area
+- Professor ratings and reviews
 
 You have access to:
 1. UC Davis knowledge base (campus info, dining, housing, buildings, etc.)
-2. Reddit search for current student opinions and experiences
-3. Google Maps for precise location and address information
+2. Real-time web search for current information
+3. Reddit search for current student opinions and experiences
+4. Google Maps for precise location and address information
+5. RateMyProfessor for professor ratings and reviews
+6. Image parsing for uploaded photos/documents
 
 When information is provided:
 - Use the UC Davis knowledge base as your primary source
-- Reference Reddit posts when discussing student opinions: "According to recent Reddit posts..."
-- Cite Google Maps data for locations and addresses
+- Use web search results for current events
+- Reference Reddit posts for student opinions
+- Cite Google Maps data for locations
+- Use RateMyProfessor data for professor ratings
+- Use extracted image text/content when answering about uploaded images
 - Be specific and detailed using the provided information
 
 Always be enthusiastic about UC Davis and provide accurate, helpful information.
@@ -199,6 +357,7 @@ class HistoryMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     conversation_history: List[HistoryMessage] = []
+    image_content: Optional[str] = None  # NEW: Extracted image content
 
 
 # ------------------------------------------------------------------------------
@@ -208,44 +367,38 @@ class ChatRequest(BaseModel):
 @app.post("/chat")
 async def chat(req: ChatRequest):
     try:
-        # STEP 1: Search UC Davis knowledge base in Supabase (hybrid search)
+        # STEP 1: Search UC Davis knowledge base
         uc_davis_context = ""
         if supabase_client:
             print("Searching UC Davis knowledge base...")
             try:
-                # First try vector search
                 query_embedding = await asyncio.to_thread(embeddings.embed_query, req.message)
                 
                 def do_vector_search():
                     return supabase_client.rpc(
                         'match_documents',
-                        {'query_embedding': query_embedding, 'match_count': 5}
+                        {'query_embedding': query_embedding, 'match_count': 10}  # Increased to 10
                     ).execute()
                 
                 response = await asyncio.to_thread(do_vector_search)
                 
-                # Check if we got good results (similarity > 0.75)
                 good_results = []
                 if response.data:
                     good_results = [doc for doc in response.data if doc.get('similarity', 0) > 0.75]
                     print(f"Vector search: {len(response.data)} docs, {len(good_results)} with >0.75 similarity")
                 
-                # If vector search didn't find good matches, try keyword search
                 if len(good_results) < 2:
                     print("Vector search weak, trying keyword search...")
-                    # Extract keywords from the query
                     keywords = [word for word in req.message.lower().split() 
                                if len(word) > 3 and word not in ['what', 'where', 'when', 'which', 'are', 'the', 'all']]
                     
                     if keywords:
                         def do_keyword_search():
-                            # Try each keyword separately and combine results
                             all_docs = []
                             for kw in keywords[:3]:
                                 result = supabase_client.table('documents').select('content').ilike('content', f'%{kw}%').limit(3).execute()
                                 if result.data:
                                     all_docs.extend(result.data)
-                            # Remove duplicates
                             seen = set()
                             unique_docs = []
                             for doc in all_docs:
@@ -253,58 +406,76 @@ async def chat(req: ChatRequest):
                                 if doc_str not in seen:
                                     seen.add(doc_str)
                                     unique_docs.append(doc)
-                            return unique_docs[:5]  # Return max 5
+                            return unique_docs[:5]
                         
                         keyword_results = await asyncio.to_thread(do_keyword_search)
                         if keyword_results:
                             print(f"Keyword search found {len(keyword_results)} documents")
-                            # DEBUG: Print preview of what we found
-                            for i, doc in enumerate(keyword_results[:2]):
-                              print(f"  Doc {i+1}: {doc['content'][:150]}...")
                             uc_davis_context = "\n\n".join([doc['content'] for doc in keyword_results])
                         else:
-                            # Fall back to vector results even if weak
                             if response.data:
                                 uc_davis_context = "\n\n".join([doc['content'] for doc in response.data])
                     else:
-                        # No good keywords, use vector results
                         if response.data:
                             uc_davis_context = "\n\n".join([doc['content'] for doc in response.data])
                 else:
-                    # Vector search found good results
                     uc_davis_context = "\n\n".join([doc['content'] for doc in good_results])
                     
             except Exception as e:
                 print(f"Error searching knowledge base: {e}")
         
-        # STEP 2: Check if we should search Reddit
+        # STEP 2: Web search
+        print(f"Searching web for: {req.message}")
+        web_search_results = await search_web_general(f"{req.message} UC Davis")
+        
+        # STEP 3: Check for professor queries
+        professor_keywords = ["professor", "prof", "instructor", "teacher", "rate my professor", "rmp", "rating"]
+        needs_professor_search = any(k in req.message.lower() for k in professor_keywords)
+        
+        # STEP 4: Check for Reddit
         search_keywords = [
             "reddit", "recent", "latest", "current", "today",
             "this year", "right now", "people say", "students think",
             "opinions", "reviews", "experiences", "what's it like",
             "best", "worst", "recommend"
         ]
-        needs_web_search = any(k in req.message.lower() for k in search_keywords)
+        needs_reddit_search = any(k in req.message.lower() for k in search_keywords)
 
-        # STEP 3: Check for location-related queries
+        # STEP 5: Check for location
         location_keywords = [
             "where", "location", "address", "directions", "find",
             "building", "place", "near", "close", "map", "how to get"
         ]
         needs_maps = any(k in req.message.lower() for k in location_keywords)
 
-        # STEP 4: Collect results from multiple sources
+        # STEP 6: Collect results
         web_results = ""
         
-        # Search Reddit if needed
-        if needs_web_search:
+        if web_search_results:
+            web_results += f"\n=== Web Search Results ===\n{web_search_results}\n"
+            print("Found web search results")
+        
+        if needs_professor_search:
+            words = req.message.split()
+            for i, word in enumerate(words):
+                if word.lower() in professor_keywords and i + 1 < len(words):
+                    potential_name = " ".join(words[i+1:min(i+3, len(words))])
+                    potential_name = re.sub(r'[^\w\s]', '', potential_name).strip()
+                    if potential_name:
+                        print(f"Searching RateMyProfessor for: {potential_name}")
+                        rmp_data = await search_rate_my_professor(potential_name)
+                        if rmp_data:
+                            web_results += f"\n=== {rmp_data} ===\n"
+                            print("Found RateMyProfessor results")
+                        break
+        
+        if needs_reddit_search:
             print(f"Searching Reddit for: {req.message}")
             reddit_data = await search_reddit(req.message)
             if reddit_data:
                 web_results += f"\n=== Reddit Posts ===\n{reddit_data}\n"
                 print("Found Reddit results")
 
-        # Search Google Maps if needed
         if needs_maps:
             print(f"Searching Google Maps for: {req.message}")
             maps_data = await search_campus_location(req.message)
@@ -312,8 +483,13 @@ async def chat(req: ChatRequest):
                 web_results += f"\n=== Campus Locations (Google Maps) ===\n{maps_data}\n"
                 print("Found Google Maps results")
 
-        # STEP 5: Build the final user prompt with all context
+        # STEP 7: Build final prompt
         context_parts = []
+        
+        # Add image content if present
+        if req.image_content:
+            context_parts.append(f"=== Uploaded Image Content ===\n{req.image_content}")
+            print(f"Using uploaded image content ({len(req.image_content)} chars)")
         
         if uc_davis_context:
             context_parts.append(f"=== UC Davis Knowledge Base ===\n{uc_davis_context}")
@@ -326,7 +502,7 @@ async def chat(req: ChatRequest):
         else:
             current_message = req.message
 
-        # STEP 6: Build LangChain message list
+        # STEP 8: Build messages
         messages = [SystemMessage(content=SYSTEM_PROMPT)]
 
         for m in req.conversation_history:

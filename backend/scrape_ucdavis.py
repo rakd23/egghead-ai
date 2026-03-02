@@ -3,6 +3,8 @@ from bs4 import BeautifulSoup
 import time
 import os
 
+
+
 def scrape_page(url):
     """Scrape a single page and return clean text"""
     try:
@@ -27,7 +29,7 @@ def scrape_page(url):
         print(f"Error scraping {url}: {e}")
         return ""
 
-# List of NEW pages to scrape (only add new ones here)
+
 urls_to_scrape = [
      "https://admissions.ucdavis.edu/",
     "https://admissions.ucdavis.edu/first-year",

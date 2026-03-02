@@ -57,6 +57,7 @@ openai==2.24.0
 orjson==3.11.7
 ormsgpack==1.12.2
 packaging @ file:///opt/miniconda3/conda-bld/packaging_1761049079150/work
+pillow==12.1.1
 postgrest==2.28.0
 primp==1.1.1
 propcache==0.4.1
