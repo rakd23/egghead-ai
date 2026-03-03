@@ -29,7 +29,6 @@ function convertEmoticons(text: string): string {
     .replace(/:\(/g, "😢")
     .replace(/;-?\)/g, "😉")
     .replace(/:-?D/g, "😄")
-    .replace(/:-?\*/g, "😘")
     .replace(/:-?O/gi, "😮")
     .replace(/:-?P/gi, "😛")
     .replace(/:b/gi, "😋")
