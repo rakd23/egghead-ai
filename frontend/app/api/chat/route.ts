@@ -6,7 +6,7 @@ export async function POST(req: Request) {
     const { message, sessionId, preferences } = body;
 
     // Call FastAPI backend with full request structure
-    const response = await fetch("http://localhost:8000/chat", {
+    const response = await fetch("https://egghead-ai.onrender.com/chat", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
