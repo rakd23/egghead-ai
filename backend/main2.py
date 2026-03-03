@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from ratemyprof import RateMyProfScraper
+ucdavis_rmp = RateMyProfScraper(1073)
+
+
+
 from supabase import create_client, Client
 
 import asyncio
@@ -7,7 +12,6 @@ import os
 from typing import List, Optional
 import re
 import base64
-from io import BytesIO
 
 from ddgs import DDGS
 from dotenv import load_dotenv
@@ -17,9 +21,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, Field
 import googlemaps
-import requests
-from bs4 import BeautifulSoup
-from PIL import Image
+
 
 
 # ------------------------------------------------------------------------------
@@ -60,7 +62,7 @@ llm = ChatOpenAI(
 
 # Vision model for image parsing
 vision_llm = ChatOpenAI(
-    model="gpt-4o-mini",  # gpt-4o-mini supports vision
+    model="gpt-4o-mini",
     temperature=0.7,
 )
 
@@ -88,6 +90,9 @@ if os.getenv("GOOGLE_MAPS_API_KEY"):
 else:
     print("WARNING: GOOGLE_MAPS_API_KEY is not set. Location search will be disabled.")
 
+# Initialize RateMyProfessor scraper for UC Davis
+ucdavis = RateMyProfScraper(1082)  # 1082 is UC Davis school ID
+
 
 # ------------------------------------------------------------------------------
 # Image Upload & Parsing Endpoint
@@ -97,22 +102,16 @@ else:
 async def upload_image(file: UploadFile = File(...)):
     """Parse text/content from uploaded images using GPT-4 Vision"""
     try:
-        # Read image
         content = await file.read()
         
-        # Validate it's an image
         if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
             raise HTTPException(status_code=400, detail="File must be an image (png, jpg, jpeg, gif, webp)")
         
-        # Convert to base64
         base64_image = base64.b64encode(content).decode('utf-8')
         
         print(f"Processing image: {file.filename}")
         
-        # Use GPT-4 Vision to extract text/understand image
         def parse_image():
-            from langchain_core.messages import HumanMessage
-            
             message = HumanMessage(
                 content=[
                     {
@@ -149,60 +148,29 @@ async def upload_image(file: UploadFile = File(...)):
 
 
 # ------------------------------------------------------------------------------
-# RateMyProfessor scraper
+# RateMyProfessor search
 # ------------------------------------------------------------------------------
 
 async def search_rate_my_professor(professor_name: str) -> str:
-    """Scrape RateMyProfessor for UC Davis professors"""
+    """Search RateMyProfessor for UC Davis professors"""
     try:
-        def do_scrape():
-            search_url = f"https://www.ratemyprofessors.com/search/professors/1082?q={professor_name.replace(' ', '%20')}"
-            
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-            }
-            
-            response = requests.get(search_url, headers=headers, timeout=10)
-            
-            if response.status_code != 200:
-                return None
-            
-            page_content = response.text
-            soup = BeautifulSoup(page_content, 'html.parser')
-            
-            scripts = soup.find_all('script')
-            for script in scripts:
-                if script.string and 'window.__RELAY_STORE__' in script.string:
-                    script_content = script.string
-                    
-                    rating_match = re.search(r'"avgRating":([\d.]+)', script_content)
-                    difficulty_match = re.search(r'"avgDifficulty":([\d.]+)', script_content)
-                    num_ratings_match = re.search(r'"numRatings":(\d+)', script_content)
-                    would_take_again_match = re.search(r'"wouldTakeAgainPercent":([\d.]+)', script_content)
-                    
-                    if rating_match:
-                        return {
-                            'rating': rating_match.group(1),
-                            'difficulty': difficulty_match.group(1) if difficulty_match else 'N/A',
-                            'num_ratings': num_ratings_match.group(1) if num_ratings_match else 'N/A',
-                            'would_take_again': would_take_again_match.group(1) if would_take_again_match else 'N/A'
-                        }
-            
-            return None
+        def do_search():
+            result = ucdavis.SearchProfessor(professor_name)
+            return result
         
-        result = await asyncio.to_thread(do_scrape)
+        result = await asyncio.to_thread(do_search)
         
         if not result:
             return ""
         
         return f"""RateMyProfessor Results for {professor_name}:
-Overall Rating: {result['rating']}/5.0
-Difficulty: {result['difficulty']}/5.0
-Number of Ratings: {result['num_ratings']}
-Would Take Again: {result['would_take_again']}%"""
+Overall Rating: {result.get('overall_rating', 'N/A')}/5.0
+Department: {result.get('tDept', 'N/A')}
+Number of Ratings: {result.get('tNumRatings', 'N/A')}
+Rating Class: {result.get('rating_class', 'N/A')}"""
     
     except Exception as e:
-        print(f"RateMyProfessor scrape error: {e}")
+        print(f"RateMyProfessor error: {e}")
         return ""
 
 
@@ -357,7 +325,7 @@ class HistoryMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     conversation_history: List[HistoryMessage] = []
-    image_content: Optional[str] = None  # NEW: Extracted image content
+    image_content: Optional[str] = None
 
 
 # ------------------------------------------------------------------------------
@@ -377,7 +345,7 @@ async def chat(req: ChatRequest):
                 def do_vector_search():
                     return supabase_client.rpc(
                         'match_documents',
-                        {'query_embedding': query_embedding, 'match_count': 10}  # Increased to 10
+                        {'query_embedding': query_embedding, 'match_count': 10}
                     ).execute()
                 
                 response = await asyncio.to_thread(do_vector_search)
@@ -486,7 +454,6 @@ async def chat(req: ChatRequest):
         # STEP 7: Build final prompt
         context_parts = []
         
-        # Add image content if present
         if req.image_content:
             context_parts.append(f"=== Uploaded Image Content ===\n{req.image_content}")
             print(f"Using uploaded image content ({len(req.image_content)} chars)")
