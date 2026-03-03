@@ -13,6 +13,7 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   references?: Reference[];
+  imagePreview?: string;
 };
 
 type Conversation = {
@@ -45,7 +46,13 @@ export default function Chat() {
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [pendingImage, setPendingImage] = useState<File | null>(null);
+  const [pendingImagePreview, setPendingImagePreview] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragCounterRef = useRef(0);
 
   useEffect(() => {
     const saved = localStorage.getItem("egghead-conversations");
@@ -64,16 +71,59 @@ export default function Chat() {
   const messages = currentConv?.messages || [];
   const hasMessages = messages.length > 0;
 
+  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPendingImage(file);
+    setPendingImagePreview(URL.createObjectURL(file));
+    e.target.value = "";
+  }
+
+  function removePendingImage() {
+    setPendingImage(null);
+    if (pendingImagePreview) URL.revokeObjectURL(pendingImagePreview);
+    setPendingImagePreview(null);
+  }
+
+  function handleDragEnter(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounterRef.current++;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) setIsDragging(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) setIsDragging(false);
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+    dragCounterRef.current = 0;
+    const file = e.dataTransfer.files?.[0];
+    if (!file || !file.type.startsWith("image/")) return;
+    setPendingImage(file);
+    setPendingImagePreview(URL.createObjectURL(file));
+  }
+
   async function handleSend() {
     const trimmed = input.trim();
-    if (!trimmed || loading) return;
+    if ((!trimmed && !pendingImage) || loading) return;
 
     let convId = currentConvId;
     if (!convId) {
       convId = Date.now().toString();
+      const title = trimmed
+        ? trimmed.slice(0, 50) + (trimmed.length > 50 ? "..." : "")
+        : `Image: ${pendingImage?.name?.slice(0, 40) ?? "upload"}`;
       const newConv: Conversation = {
         id: convId,
-        title: trimmed.slice(0, 50) + (trimmed.length > 50 ? "..." : ""),
+        title,
         messages: [],
         timestamp: Date.now(),
       };
@@ -81,14 +131,24 @@ export default function Chat() {
       setCurrentConvId(convId);
     }
 
-    const userMessage: Message = { role: "user", content: trimmed };
+    const userMessageContent = trimmed || `[Image: ${pendingImage?.name}]`;
+    const userMessage: Message = {
+      role: "user",
+      content: userMessageContent,
+      imagePreview: pendingImagePreview ?? undefined,
+    };
+
     setConversations((prev) =>
       prev.map((c) =>
         c.id === convId ? { ...c, messages: [...c.messages, userMessage] } : c
       )
     );
 
+    const imageFile = pendingImage;
+    const imagePreviewUrl = pendingImagePreview;
     setInput("");
+    setPendingImage(null);
+    setPendingImagePreview(null);
     setLoading(true);
 
     const conversation_history = messages.map((m) => ({
@@ -97,10 +157,34 @@ export default function Chat() {
     }));
 
     try {
+      // Step 1: Upload image if present
+      let image_content: string | undefined;
+      if (imageFile) {
+        setUploadingImage(true);
+        const formData = new FormData();
+        formData.append("file", imageFile);
+        const uploadRes = await fetch("http://127.0.0.1:8000/upload-image", {
+          method: "POST",
+          body: formData,
+        });
+        setUploadingImage(false);
+        if (!uploadRes.ok) {
+          const errText = await uploadRes.text();
+          throw new Error(`Image upload failed: ${errText}`);
+        }
+        const uploadData = await uploadRes.json();
+        image_content = uploadData.text;
+      }
+
+      // Step 2: Send chat
       const res = await fetch("http://127.0.0.1:8000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed, conversation_history }),
+        body: JSON.stringify({
+          message: trimmed || "Please describe and analyze the uploaded image.",
+          conversation_history,
+          ...(image_content ? { image_content } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -125,11 +209,11 @@ export default function Chat() {
         )
       );
     } catch (error: any) {
+      setUploadingImage(false);
       const assistantMessage: Message = {
         role: "assistant",
         content: `Error: ${error?.message || "could not reach backend."}`,
       };
-
       setConversations((prev) =>
         prev.map((c) =>
           c.id === convId
@@ -139,11 +223,14 @@ export default function Chat() {
       );
     } finally {
       setLoading(false);
+      setUploadingImage(false);
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     }
   }
 
   function createNewChat() {
     setCurrentConvId(null);
+    removePendingImage();
   }
 
   function deleteConversation(id: string, e: React.MouseEvent) {
@@ -168,7 +255,26 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex h-screen bg-gradient-to-b from-[#0F2A54] via-[#0B1E3D] to-[#001426] text-white">
+    <div
+      className="flex h-screen bg-gradient-to-b from-[#0F2A54] via-[#0B1E3D] to-[#001426] text-white relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Full-screen drag overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#0B1E3D]/80 border-4 border-dashed border-yellow-400 rounded-none pointer-events-none">
+          <div className="flex flex-col items-center gap-3 text-yellow-400">
+            <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            <p className="text-xl font-semibold">Drop image here</p>
+          </div>
+        </div>
+      )}
       {sidebarOpen && (
         <div className="w-64 bg-[#071936] border-r border-white/10 flex flex-col">
           <div className="p-4">
@@ -279,7 +385,12 @@ export default function Chat() {
                 input={input}
                 setInput={setInput}
                 loading={loading}
+                uploadingImage={uploadingImage}
                 onSend={handleSend}
+                onImageClick={() => fileInputRef.current?.click()}
+                pendingImagePreview={pendingImagePreview}
+                pendingImageName={pendingImage?.name ?? null}
+                onRemoveImage={removePendingImage}
               />
             </div>
           </div>
@@ -303,6 +414,16 @@ export default function Chat() {
                     <div className="text-sm opacity-70 mb-1">
                       {m.role === "user" ? "You" : "Egghead"}
                     </div>
+
+                    {/* Image thumbnail in message bubble */}
+                    {m.imagePreview && (
+                      <img
+                        src={m.imagePreview}
+                        alt="Uploaded"
+                        className="mb-2 max-h-40 rounded-lg border border-white/20 object-contain"
+                      />
+                    )}
+
                     <div className="text-sm leading-relaxed">
                       <ReactMarkdown
                         components={{
@@ -344,9 +465,15 @@ export default function Chat() {
                 <div className="px-5 py-4 rounded-2xl bg-[#0E2A55]/60 border border-white/10 max-w-[85%] mr-auto shadow-md">
                   <div className="text-sm opacity-70 mb-2">Egghead</div>
                   <div className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-yellow-400 animate-bounce [animation-delay:0ms]" />
-                    <span className="w-2 h-2 rounded-full bg-yellow-400 animate-bounce [animation-delay:150ms]" />
-                    <span className="w-2 h-2 rounded-full bg-yellow-400 animate-bounce [animation-delay:300ms]" />
+                    {uploadingImage ? (
+                      <span className="text-xs text-yellow-400/70">Uploading image...</span>
+                    ) : (
+                      <>
+                        <span className="w-2 h-2 rounded-full bg-yellow-400 animate-bounce [animation-delay:0ms]" />
+                        <span className="w-2 h-2 rounded-full bg-yellow-400 animate-bounce [animation-delay:150ms]" />
+                        <span className="w-2 h-2 rounded-full bg-yellow-400 animate-bounce [animation-delay:300ms]" />
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -357,10 +484,24 @@ export default function Chat() {
               input={input}
               setInput={setInput}
               loading={loading}
+              uploadingImage={uploadingImage}
               onSend={handleSend}
+              onImageClick={() => fileInputRef.current?.click()}
+              pendingImagePreview={pendingImagePreview}
+              pendingImageName={pendingImage?.name ?? null}
+              onRemoveImage={removePendingImage}
             />
           </div>
         )}
+
+        {/* Hidden file input — lives here so fileInputRef works */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
+          className="hidden"
+          onChange={handleImageSelect}
+        />
       </main>
     </div>
   );
@@ -376,34 +517,87 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function ChatInput({
-  input, setInput, loading, onSend,
+  input,
+  setInput,
+  loading,
+  uploadingImage,
+  onSend,
+  onImageClick,
+  pendingImagePreview,
+  pendingImageName,
+  onRemoveImage,
 }: {
   input: string;
   setInput: (v: string) => void;
   loading: boolean;
+  uploadingImage: boolean;
   onSend: () => void;
+  onImageClick: () => void;
+  pendingImagePreview: string | null;
+  pendingImageName: string | null;
+  onRemoveImage: () => void;
 }) {
   return (
-    <div className="flex items-center w-full bg-[#0E2A55] border border-white/20 rounded-full px-4 py-3">
-      <input
-        type="text"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder="Ask anything, Aggie..."
-        className="flex-1 bg-transparent outline-none text-white placeholder-white/60"
-        onKeyDown={(e) => { if (e.key === "Enter") onSend(); }}
-        disabled={loading}
-      />
-      <button
-        onClick={onSend}
-        disabled={loading}
-        className="ml-3 w-10 h-10 rounded-full bg-yellow-400 disabled:opacity-60 flex items-center justify-center text-[#0B1E3D] font-bold"
-        aria-label="Send"
-        title="Send"
-        type="button"
-      >
-        ↑
-      </button>
+    <div className="flex flex-col w-full gap-2">
+      {/* Pending image preview pill */}
+      {pendingImagePreview && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-[#0E2A55] border border-yellow-400/30 rounded-xl w-fit max-w-full">
+          <img
+            src={pendingImagePreview}
+            alt="preview"
+            className="w-8 h-8 rounded object-cover border border-white/20"
+          />
+          <span className="text-xs text-white/70 truncate max-w-[180px]">
+            {pendingImageName}
+          </span>
+          <button
+            onClick={onRemoveImage}
+            className="text-white/40 hover:text-red-400 transition-colors text-sm ml-1"
+            title="Remove image"
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-center w-full bg-[#0E2A55] border border-white/20 rounded-full px-4 py-3">
+        {/* Image attach button */}
+        <button
+          onClick={onImageClick}
+          disabled={loading}
+          className="mr-3 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors disabled:opacity-40 text-white/60 hover:text-yellow-400"
+          title="Attach image"
+          type="button"
+          aria-label="Attach image"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+        </button>
+
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder={pendingImagePreview ? "Ask about the image..." : "Ask anything, Aggie..."}
+          className="flex-1 bg-transparent outline-none text-white placeholder-white/60"
+          onKeyDown={(e) => { if (e.key === "Enter") onSend(); }}
+          disabled={loading}
+        />
+        <button
+          onClick={onSend}
+          disabled={loading || (!input.trim() && !pendingImagePreview)}
+          className="ml-3 w-10 h-10 rounded-full bg-yellow-400 disabled:opacity-60 flex items-center justify-center text-[#0B1E3D] font-bold"
+          aria-label="Send"
+          title="Send"
+          type="button"
+        >
+          ↑
+        </button>
+      </div>
     </div>
   );
 }
