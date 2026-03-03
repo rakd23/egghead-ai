@@ -162,7 +162,7 @@ export default function Chat() {
         setUploadingImage(true);
         const formData = new FormData();
         formData.append("file", imageFile);
-        const uploadRes = await fetch("http://127.0.0.1:8000/upload-image", {
+        const uploadRes = await fetch("https://egghead-ai.onrender.com/upload-image", {
           method: "POST",
           body: formData,
         });
@@ -176,7 +176,7 @@ export default function Chat() {
       }
 
       // Step 2: Send chat
-      const res = await fetch("http://127.0.0.1:8000/chat", {
+      const res = await fetch("https://egghead-ai.onrender.com/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
