@@ -1,4 +1,3 @@
-import { handlers } from "../../../../auth0";
+import { auth0 } from "../../../../auth0";
 
-export const GET = handlers.GET;
-export const POST = handlers.POST;
+export const GET = auth0.handleAuth();
