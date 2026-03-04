@@ -232,6 +232,38 @@ Profile: {rmp_link}
 
 
 # ------------------------------------------------------------------------------
+# General Web Search for Person
+# ------------------------------------------------------------------------------
+
+async def search_person_web(name: str) -> Optional[str]:
+    """
+    Searches the web for general information about a person.
+    Returns summary snippets.
+    """
+    try:
+        def run():
+            with DDGS() as ddgs:
+                return list(ddgs.text(name, max_results=5))
+
+        results = await asyncio.to_thread(run)
+
+        if not results:
+            return None
+
+        summaries = []
+        for r in results[:3]:
+            summaries.append(
+                f"Title: {r.get('title')}\nSnippet: {r.get('body')}\nURL: {r.get('href')}"
+            )
+
+        return "\n\n".join(summaries)
+
+    except Exception as e:
+        print("Web search error:", e)
+        return None
+
+
+# ------------------------------------------------------------------------------
 # Reddit Search
 # ------------------------------------------------------------------------------
 
@@ -317,24 +349,30 @@ async def chat(req: ChatRequest):
             if res.data:
                 uc_davis_context = "\n\n".join(d["content"] for d in res.data)
 
-        # STEP 2 — Professor Detection
+        # STEP 2 — Name Detection (Generalized)
         combined_text = req.message or ""
         if req.image_content:
             combined_text += " " + req.image_content
 
         names = extract_professor_names(combined_text)
-        print("Detected professors:", names)
+        print("Detected names:", names)
 
-        if names:
-            for name in names:
-                rmp_data = await search_rate_my_professor(name)
-                if rmp_data:
-                    web_results += f"\n=== RateMyProfessor ===\n{rmp_data}\n"
-                else:
-                    web_results += f"\nNo RateMyProfessor data was found for {name}.\n"
-        else:
-            if "professor" in req.message.lower():
-                web_results += "\nPlease provide the full professor name (First and Last).\n"
+        for name in names:
+            web_results += f"\n=== Web Search Results for {name} ===\n"
+
+            # 1️⃣ Always do general web search
+            web_info = await search_person_web(name)
+            if web_info:
+                web_results += web_info + "\n"
+
+            # 2️⃣ Also attempt RateMyProfessor
+            rmp_data = await search_rate_my_professor(name)
+            if rmp_data:
+                web_results += f"\n=== RateMyProfessor ===\n{rmp_data}\n"
+
+            # 3️⃣ If nothing found
+            if not web_info and not rmp_data:
+                web_results += f"No significant web results found for {name}.\n"
 
         # STEP 3 — Reddit
         reddit = await search_reddit(req.message)
