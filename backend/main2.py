@@ -354,25 +354,19 @@ async def chat(req: ChatRequest):
         if req.image_content:
             combined_text += " " + req.image_content
 
+        # STEP 2 — Always do general web search on full query
+        general_web = await search_person_web(req.message)
+        if general_web:
+            web_results += f"\n=== General Web Search ===\n{general_web}\n"
+
+        # STEP 3 — Name Detection for Professor-specific lookup
         names = extract_professor_names(combined_text)
         print("Detected names:", names)
 
         for name in names:
-            web_results += f"\n=== Web Search Results for {name} ===\n"
-
-            # 1️⃣ Always do general web search
-            web_info = await search_person_web(name)
-            if web_info:
-                web_results += web_info + "\n"
-
-            # 2️⃣ Also attempt RateMyProfessor
             rmp_data = await search_rate_my_professor(name)
             if rmp_data:
-                web_results += f"\n=== RateMyProfessor ===\n{rmp_data}\n"
-
-            # 3️⃣ If nothing found
-            if not web_info and not rmp_data:
-                web_results += f"No significant web results found for {name}.\n"
+                web_results += f"\n=== RateMyProfessor for {name} ===\n{rmp_data}\n"
 
         # STEP 3 — Reddit
         reddit = await search_reddit(req.message)
