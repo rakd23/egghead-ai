@@ -1,127 +1,220 @@
 # Egghead.AI Setup Instructions
 
-## 📁 File Structure
+## Project Structure
 
 ```
 your-project/
 ├── app/
-│   ├── page.tsx              ← Replace with the new page.tsx
-│   ├── layout.tsx            ← Keep your existing one
-│   ├── globals.css           ← Keep your existing one
+│   ├── page.tsx              # Replace with the new page.tsx
+│   ├── layout.tsx            # Keep existing file
+│   ├── globals.css           # Keep existing file
 │   └── api/
 │       └── chat/
-│           └── route.ts      ← Create this file
-├── main.py                   ← Create this file
-├── package.json              ← Keep your existing one
-└── README.md                 ← This file
+│           └── route.ts      # Create this file
+├── main.py                   # FastAPI backend
+├── package.json              # Frontend dependencies
+└── README.md
 ```
 
-## 🚀 Step-by-Step Setup
+---
 
-### 1. Install Frontend Dependencies (if not already)
+# Setup
 
-```bash
+## 1. Install Frontend Dependencies
+
+If dependencies are not installed:
+
+```
 npm install
-# or
+```
+
+or
+
+```
 yarn install
 ```
 
-### 2. Install Backend Dependencies
+---
 
-```bash
+## 2. Install Backend Dependencies
+
+Install the required Python packages:
+
+```
 pip install fastapi uvicorn pydantic
 ```
 
-### 3. Copy the Files
+---
 
-1. **Replace** `app/page.tsx` with the new `page.tsx` file
-2. **Create** `app/api/chat/route.ts` with the `route.ts` file
-3. **Create** `main.py` in your project root with the `main.py` file
+## 3. Copy Required Files
 
-### 4. Run the Backend (Terminal 1)
+Make the following changes to your project:
 
-```bash
+* Replace `app/page.tsx` with the updated `page.tsx`
+* Create `app/api/chat/route.ts` using the provided `route.ts`
+* Create `main.py` in the project root using the provided backend code
+
+---
+
+## 4. Start the Backend
+
+Run the FastAPI server:
+
+```
 python main.py
 ```
 
-You should see:
+Expected output:
+
 ```
 INFO:     Uvicorn running on http://0.0.0.0:8000
 INFO:     Application startup complete.
 ```
 
-### 5. Run the Frontend (Terminal 2)
+---
 
-```bash
+## 5. Start the Frontend
+
+In a separate terminal:
+
+```
 npm run dev
 ```
 
-You should see:
+Expected output:
+
 ```
-▲ Next.js 14.x.x
-- Local:        http://localhost:3000
+Next.js
+Local: http://localhost:3000
 ```
 
-### 6. Open Your Browser
+---
 
-Go to: http://localhost:3000
+## 6. Open the Application
 
-## ✨ Features
+Navigate to:
 
-- **Sidebar with conversation history** grouped by date (Today, Yesterday, Last 7 Days, Older)
-- **Dynamic layout** - centered title that moves to top-left after first message
-- **New Chat button** - start fresh conversations
-- **Delete conversations** - hover over any conversation to see the × button
-- **localStorage** - all conversations are saved automatically
-- **Connected to FastAPI backend** - messages go through your Python backend
+```
+http://localhost:3000
+```
 
-## 🧪 Testing
+---
 
-Try these messages:
-- "Hello!" → Should get "I'm still learning, but I got your message!"
-- "Tell me about UC Davis" → Should get "UC Davis is a great campus 🌳"
+# Features
 
-## 🔧 Troubleshooting
+* Conversation history grouped by date (Today, Yesterday, Last 7 Days, Older)
+* Dynamic interface: title moves after the first message
+* New chat creation
+* Conversation deletion
+* Persistent conversations stored in `localStorage`
+* Integration with a FastAPI backend for message handling
 
-### Frontend shows "Error: could not reach backend"
-- Make sure `python main.py` is running in a separate terminal
-- Check that port 8000 is not being used by another process
+---
 
-### Port 3000 already in use
-```bash
-# Kill the process on port 3000
+# Testing
+
+Example test messages:
+
+```
+Hello!
+```
+
+Expected response:
+
+```
+I'm still learning, but I received your message.
+```
+
+```
+Tell me about UC Davis
+```
+
+Expected response:
+
+```
+UC Davis is a major public research university in California.
+```
+
+---
+
+# Troubleshooting
+
+## Frontend Cannot Reach Backend
+
+Ensure the backend server is running:
+
+```
+python main.py
+```
+
+Also confirm that port `8000` is not already in use.
+
+---
+
+## Port 3000 Already in Use
+
+Kill the existing process:
+
+```
 lsof -ti:3000 | xargs kill -9
-# Or run on a different port
+```
+
+Or run the frontend on a different port:
+
+```
 npm run dev -- -p 3001
 ```
 
-### Port 8000 already in use
-```bash
-# Kill the process on port 8000
+---
+
+## Port 8000 Already in Use
+
+Terminate the process using the port:
+
+```
 lsof -ti:8000 | xargs kill -9
-# Or change the port in main.py
-uvicorn.run(app, host="0.0.0.0", port=8001)
-# And update route.ts to match
 ```
 
-### Conversations not saving
-- Check browser console for localStorage errors
-- Try clearing localStorage: Open DevTools > Application > Local Storage > Delete
+Or change the port in `main.py`:
 
-## 📝 Next Steps
+```
+uvicorn.run(app, host="0.0.0.0", port=8001)
+```
 
-Now that it's working, you can enhance the backend in `main.py`:
-- Add the UC Davis resources from your game plan
-- Integrate with Hugging Face models
-- Add more sophisticated routing logic
-- Connect to a database instead of localStorage
+If the port changes, update the API endpoint in `route.ts`.
 
-## 🎨 Keeping Your Colors
+---
 
-The new UI uses your exact colors:
-- `#200E57` → `#3B1FA6` gradient background
-- `#2A176B` for message bubbles and input
-- Yellow (`#FFD700`) for branding
-- White borders and text
+## Conversations Not Saving
 
-All your original styling is preserved!
+Check the browser console for `localStorage` errors.
+
+You may need to clear stored data:
+
+1. Open browser developer tools
+2. Navigate to the **Application** tab
+3. Select **Local Storage**
+4. Remove existing entries
+
+---
+
+# Next Steps
+
+Potential improvements:
+
+* Add UC Davis resource data for retrieval
+* Integrate an LLM or Hugging Face model
+* Implement smarter query routing
+* Replace `localStorage` with a persistent database
+* Add authentication and user accounts
+
+---
+
+# Design
+
+The interface preserves the original color palette:
+
+* Background gradient: `#200E57 → #3B1FA6`
+* Message and input containers: `#2A176B`
+* Branding accent: `#FFD700`
+* White borders and typography
