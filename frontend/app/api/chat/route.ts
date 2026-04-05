@@ -1,47 +1,54 @@
 import { NextResponse } from "next/server";
 
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { message, sessionId, preferences } = body;
+    const { message, conversation_history, image_content } = body;
 
-    // Call FastAPI backend with full request structure
-    const response = await fetch("https://egghead-ai.onrender.com/chat", {
+    if (!message || typeof message !== "string" || message.trim().length === 0) {
+      return NextResponse.json(
+        { error: "Message is required" },
+        { status: 400 }
+      );
+    }
+
+    const response = await fetch(`${BACKEND_URL}/chat`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        message,
-        session_id: sessionId,
-        preferences: preferences || {
-          tone: "friendly",
-          depth: "medium",
-          use_ucd_sources: true,
-          show_references: true,
-          model: "hf:mistralai/Mistral-7B-Instruct",
-        },
+        message: message.trim(),
+        conversation_history: conversation_history || [],
+        ...(image_content ? { image_content } : {}),
       }),
     });
 
+    if (response.status === 429) {
+      const detail = await response.json();
+      return NextResponse.json(
+        { error: "rate_limited", detail },
+        { status: 429 }
+      );
+    }
+
     if (!response.ok) {
-      throw new Error(`Backend returned ${response.status}`);
+      const text = await response.text();
+      console.error(`Backend error (${response.status}): ${text}`);
+      return NextResponse.json(
+        { error: `Backend returned ${response.status}` },
+        { status: 502 }
+      );
     }
 
     const data = await response.json();
+    return NextResponse.json(data);
 
-    return NextResponse.json({
-      reply: data.reply,
-      sessionId: data.session_id,
-      references: data.references || [],
-      usedModel: data.used_model,
-      safety: data.safety,
-    });
   } catch (error) {
-    console.error("Error calling FastAPI backend:", error);
-    
-    return NextResponse.json({
-      reply: "Sorry, I'm having trouble connecting to my backend. Make sure the FastAPI server is running on port 8000.",
-    }, { status: 500 });
+    console.error("API route error:", error);
+    return NextResponse.json(
+      { error: "Failed to reach backend. Is the server running?" },
+      { status: 502 }
+    );
   }
 }
