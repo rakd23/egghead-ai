@@ -1,3 +1,6 @@
+# main2.py — production entry point
+# main.py is a discarded prototype from early development and is not used.
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
