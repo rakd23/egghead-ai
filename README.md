@@ -2,7 +2,7 @@
 
 Egghead AI is a full-stack project I built to help UC Davis students find information about classes, professors, and campus resources in one place.
 
-I originally made it because I kept switching between RateMyProfessor, Reddit, and UC Davis websites just to answer simple questions. This project combines those sources into a single system and returns both a short explanation and structured data.
+ Made because switching between RateMyProfessor, Reddit, and UC Davis websites just to answer simple questions. This project combines those sources into a single system and returns both a short explanation and structured data.
 
 > Note: The app was previously deployed (Vercel + Render) and used by ~100 students, but I took it down due to API costs.
 
@@ -77,7 +77,7 @@ frontend/
 ## Design Choices
 
 **Why not just use GPT for everything?**  
-I wanted the system to retrieve and rank real data instead of just generating answers. The LLM is only used for summarizing results.
+The system is used to retrieve and rank real data instead of just generating answers. The LLM is only used for summarizing results.
 
 **Why keyword-based classification?**  
 It’s fast and predictable. For this use case, it worked well without needing a model.
@@ -96,11 +96,11 @@ Different sources provide different types of information (official data vs stude
 
 ---
 
-## Why I built this
+## What's the point?
 
-I built this project to solve a problem I personally had as a student — finding reliable information across multiple sites was slow and annoying.
+ This project to solve a problem many students personally have. AKA finding reliable information across multiple sites is slow and annoying.
 
-It also helped me learn more about:
+Learned Ideas:
 - building full-stack applications
 - working with APIs
 - designing backend pipelines
